@@ -3,8 +3,16 @@
 
   "form": {
     "title": "IT Equipment & Access Request",
-    "intro": "Use this form to request hardware, software, or system access. Requests are reviewed by the DCS team within two business days."
+    "intro": "Use this form to request hardware, software, or system access. Requests are reviewed by the DCS team within two business days.",
+    "appearance": {
+      "frame": "card",
+      "header": "band",
+      "tint": "sky",
+      "icon": "abacus-icons/digital-form-48.svg"
+    }
   },
+
+  "sharedColumns": ["SubCategory"],
 
   "target": {
     "siteUrl": null,
@@ -15,7 +23,8 @@
   "confirmation": {
     "title": "Request submitted",
     "message": "Your request has been logged. You'll receive a confirmation email, and the DCS team will follow up within two business days.",
-    "allowAnother": true
+    "allowAnother": true,
+    "illustration": "spot-illustrations/checkmark-l.svg"
   },
 
   "attachments": {

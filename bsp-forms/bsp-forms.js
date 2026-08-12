@@ -269,6 +269,13 @@
     if (u.charAt(0) === '/') return location.origin + u;
     return u;
   }
+  function resolveAsset(p) {
+    // config asset paths ("abacus-icons/x.svg") resolve against the deployed
+    // design-system folder; absolute urls/paths pass through untouched.
+    if (!p) return p;
+    if (/^https?:/i.test(p) || p.charAt(0) === '/') return p;
+    return designBase + p;
+  }
 
   /* ------------------------------------------------------------------
      SP adapter — one seam over pnpjs v2, replaceable by a mock.
@@ -393,6 +400,9 @@
     var cfg = JSON.parse(JSON.stringify(raw || {}));
 
     cfg.form = cfg.form || {};
+    cfg.form.appearance = Object.assign(
+      { frame: 'card', header: 'band', tint: 'sky', icon: null },
+      cfg.form.appearance || {});
     cfg.strings = Object.assign({}, DEFAULT_STRINGS, cfg.strings || {});
     cfg.target = cfg.target || {};
     if (!cfg.target.listTitle && !cfg.target.listId) errors.push('target.listTitle or target.listId is required');
@@ -468,6 +478,24 @@
       if (ap == null) cfg.attachments.page = cfg.pages.length - 1;
       else if (ap < 0 || ap >= cfg.pages.length) { errors.push('attachments.page is out of range'); cfg.attachments.page = cfg.pages.length - 1; }
     }
+
+    // shared columns — several fields may write one column, but only when
+    // the config says so explicitly; accidental duplicates are config errors.
+    var shared = Array.isArray(cfg.sharedColumns) ? cfg.sharedColumns.slice() : [];
+    var colFields = {};
+    ordered.forEach(function (f) {
+      if (f.column) (colFields[f.column] = colFields[f.column] || []).push(f.id);
+    });
+    Object.keys(colFields).forEach(function (col) {
+      if (colFields[col].length > 1 && shared.indexOf(col) < 0) {
+        errors.push('column "' + col + '" is mapped by multiple fields (' + colFields[col].join(', ') +
+          ') — declare it in sharedColumns to confirm the conditional variants are intentional');
+      }
+    });
+    shared.forEach(function (col) {
+      if (!colFields[col]) errors.push('sharedColumns entry "' + col + '" is not mapped by any field');
+    });
+    cfg._sharedColumns = shared; cfg._colFields = colFields;
 
     cfg._byKey = byKey; cfg._ordered = ordered; cfg._keyOfId = keyOfId;
     return { cfg: cfg, errors: errors };
@@ -839,23 +867,32 @@
 
   function renderForm(uid, cfg) {
     var S = cfg.strings;
+    var ap = cfg.form.appearance;
+    var card = ap.frame !== 'plain';
     var pages = cfg.pages;
     var last = pages.length - 1;
-    var h = '<div class="bspf" x-data="BSPForms.instance(' + esc(jstr(uid)) + ')" data-bspf-uid="' + esc(uid) + '">';
+    var h = '<div class="bspf' + (card ? ' bspf--card' : '') + '" x-data="BSPForms.instance(' + esc(jstr(uid)) + ')" data-bspf-uid="' + esc(uid) + '">';
 
-    // Header
-    if (cfg.form.title || cfg.form.intro) {
-      h += '<header class="bspf__head" x-show="view===\'form\'">';
-      if (cfg.form.title !== null && cfg.form.title !== undefined && cfg.form.showTitle !== false) {
-        h += '<h2 class="bspf__title">' + esc(cfg.form.title) + '</h2>';
-      }
+    // Header — shown on every view so the form keeps its identity through
+    // the confirmation screen.
+    if ((cfg.form.title && cfg.form.showTitle !== false) || cfg.form.intro || ap.icon) {
+      var headCls = 'bspf__head' + (ap.header === 'band' ? ' bspf__head--band bspf__head--' + esc(ap.tint || 'sky') : '');
+      h += '<header class="' + headCls + '">';
+      h += '<div class="bspf__head-copy">';
+      if (cfg.form.title && cfg.form.showTitle !== false) h += '<h2 class="bspf__title">' + esc(cfg.form.title) + '</h2>';
       if (cfg.form.intro) h += '<p class="bspf__intro">' + esc(cfg.form.intro) + '</p>';
+      h += '</div>';
+      if (ap.icon) h += '<img class="bspf__head-icon" src="' + esc(resolveAsset(ap.icon)) + '" alt="">';
       h += '</header>';
     }
 
+    // Body
+    h += '<form class="bspf__body" x-show="view===\'form\'" novalidate @submit.prevent="nextOrSubmit()">';
+    h += '<div class="bspf__content">';
+
     // Stepper
     if (pages.length > 1) {
-      h += '<ol class="stepper bspf__stepper" x-show="view===\'form\'" aria-label="' + esc(fmtStr(S.stepOf, { n: '', total: pages.length })) + '">';
+      h += '<ol class="stepper bspf__stepper" aria-label="' + esc(fmtStr(S.stepOf, { n: '', total: pages.length })) + '">';
       pages.forEach(function (pg, i) {
         h += '<li class="stepper__step" :class="{ \'is-current\': page===' + i + ', \'is-done\': page>' + i + ', \'is-error\': pageHasError(' + i + ') }"' +
           ' @click="goTo(' + i + ')">' +
@@ -868,8 +905,6 @@
       h += '</ol>';
     }
 
-    // Body
-    h += '<form class="bspf__body" x-show="view===\'form\'" novalidate @submit.prevent="nextOrSubmit()">';
     pages.forEach(function (pg, i) {
       h += '<div class="bspf-page" x-show="page===' + i + '"' + (i > 0 ? ' x-cloak' : '') + '>';
       if (pages.length > 1 && pg.title) h += '<h3 class="bspf-page__title">' + esc(pg.title) + '</h3>';
@@ -894,7 +929,9 @@
       icon(ICONS.danger, 20).replace('class="icon', 'class="msgbar__icon icon') +
       '<div class="msgbar__body" x-text="pageError"></div></div>';
 
-    h += '<div class="bspf-nav">';
+    h += '</div>'; // .bspf__content
+
+    h += '<div class="bspf-nav' + (card ? ' bspf-nav--foot' : '') + '">';
     h += '<button type="button" class="btn" x-show="page>0" x-cloak @click="prev()">' + esc(S.back) + '</button>';
     h += '<span class="bspf-nav__spacer"></span>';
     if (last > 0) h += '<button type="button" class="btn btn--primary" x-show="page<' + last + '" @click="next()">' + esc(S.next) + '</button>';
@@ -904,7 +941,7 @@
     h += '</div></form>';
 
     // Attachment-retry view (item saved, some uploads failed)
-    h += '<div class="bspf-page" x-show="view===\'attachRetry\'" x-cloak>' +
+    h += '<div class="bspf__content" x-show="view===\'attachRetry\'" x-cloak><div class="bspf-page">' +
       '<div class="msgbar msgbar--warning" role="alert">' +
       icon(ICONS.warning, 20).replace('class="icon', 'class="msgbar__icon icon') +
       '<div class="msgbar__body"><strong>' + esc(S.attachPartialTitle) + '</strong><br>' +
@@ -920,12 +957,16 @@
       '<button type="button" class="btn" @click="skipAttachments()">' + esc(S.attachSkip) + '</button>' +
       '<button type="button" class="btn btn--primary" :disabled="busy" @click="retryAttachments()">' +
       '<span class="spinner spinner--16 spinner--on-accent" x-show="busy" x-cloak aria-hidden="true"></span> ' + esc(S.attachRetry) + '</button>' +
-      '</div></div>';
+      '</div></div></div>';
 
     // Confirmation view
-    h += '<div class="bspf-done" x-show="view===\'done\'" x-cloak>' +
-      '<svg class="icon icon--48 bspf-done__icon" aria-hidden="true"><use href="#ic-fluent-checkmark-circle-24-filled"/></svg>' +
-      '<h2 class="bspf-done__title">' + esc(cfg.confirmation.title || S.confirmTitle) + '</h2>';
+    h += '<div class="bspf-done" x-show="view===\'done\'" x-cloak>';
+    if (cfg.confirmation.illustration) {
+      h += '<img class="bspf-done__art" src="' + esc(resolveAsset(cfg.confirmation.illustration)) + '" alt="">';
+    } else {
+      h += '<svg class="icon icon--48 bspf-done__icon" aria-hidden="true"><use href="#ic-fluent-checkmark-circle-24-filled"/></svg>';
+    }
+    h += '<h2 class="bspf-done__title">' + esc(cfg.confirmation.title || S.confirmTitle) + '</h2>';
     var cMsg = cfg.confirmation.message || S.confirmMessage;
     if (cMsg) h += '<p class="bspf-done__msg">' + esc(cMsg) + '</p>';
     if (cfg.confirmation.allowAnother !== false) {
@@ -1315,6 +1356,17 @@
         var self = this;
         var payload = {};
         var titleMapped = false;
+        // dev aid: a shared column should have at most one visible field
+        cfg._sharedColumns.forEach(function (col) {
+          var visIds = (cfg._colFields[col] || []).filter(function (id) {
+            var f = cfg._byKey[cfg._keyOfId[id]];
+            return f && self.fieldActive(f);
+          });
+          if (visIds.length > 1) {
+            console.warn('[BSP Forms] shared column "' + col + '": ' + visIds.length +
+              ' fields visible at once (' + visIds.join(', ') + ') — the later field wins.');
+          }
+        });
         return Promise.all(cfg._ordered.map(function (f) {
           if (!f.column || !self.fieldActive(f)) return null;
           if (f.type === 'person') {
@@ -1533,7 +1585,9 @@
         }
         if (fd.ReadOnlyField) level = 'error';
         rows.push({
-          field: f.id, column: f.column, expected: expectedLabel(f),
+          field: f.id,
+          column: f.column + (cfg._sharedColumns.indexOf(f.column) > -1 ? ' · shared' : ''),
+          expected: expectedLabel(f),
           actual: actual + (fd.ReadOnlyField ? ' (read-only)' : ''), level: level
         });
       });

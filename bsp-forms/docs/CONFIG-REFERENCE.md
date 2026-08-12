@@ -21,6 +21,16 @@ below in use.
 | `title` | — | Shown as the form heading and available as `{form:title}`. |
 | `intro` | — | Boilerplate paragraph under the title. |
 | `showTitle` | `true` | Set `false` to suppress the heading (e.g. the page already has one). |
+| `appearance` | see below | How the form sits on the page. |
+
+### `form.appearance`
+
+| Key | Default | Notes |
+| --- | --- | --- |
+| `frame` | `"card"` | `"card"` = raised surface (border, radius, shadow, padded content, footer nav strip). `"plain"` = the flat chrome-less layout. |
+| `header` | `"band"` | `"band"` = tinted header strip behind title/intro; `"plain"` = no strip. |
+| `tint` | `"sky"` | Band ground: `sky` · `blue` · `neutral` (the engagement-layer surface tints). |
+| `icon` | — | Brand icon shown at the right of the header, e.g. `"abacus-icons/digital-form-48.svg"`. Paths without a leading `/` resolve against the deployed `bsp-design/` folder; absolute URLs pass through. |
 
 ## `target`
 
@@ -39,6 +49,7 @@ below in use.
 | `message` | strings.confirmMessage | Body text. |
 | `allowAnother` | `true` | Show a "Submit another response" button (resets the form). |
 | `anotherLabel` | strings.confirmAnother | Label for that button. |
+| `illustration` | — | Artwork above the title, replacing the default checkmark icon — e.g. `"spot-illustrations/checkmark-l.svg"` (resolved against `bsp-design/` like `appearance.icon`). |
 
 ## `attachments`
 
@@ -117,9 +128,19 @@ a cycle when omitted, so configs can stay plain arrays.
 ### Conditional variants (shared columns)
 
 Multiple fields may declare the same `column` and be shown/hidden by different
-criteria (e.g. a different option list per category). The form creator is
-responsible for showing at most one at a time; if several are visible, the
-**field that appears later in the JSON wins** at submit time.
+criteria (e.g. a different option list per category) — but the column must be
+**declared** in a top-level `sharedColumns` array:
+
+```json
+"sharedColumns": ["SubCategory"]
+```
+
+A column mapped by more than one field that is *not* declared is a config
+error (this catches accidental duplicates); a declared entry no field maps to
+is also an error (catches typos). The form creator is responsible for showing
+at most one variant at a time; if several are visible, the **field that
+appears later in the JSON wins** at submit time (and the engine logs a
+console warning). The doctor report tags these rows `· shared`.
 
 ## Rules (`visibleWhen`)
 

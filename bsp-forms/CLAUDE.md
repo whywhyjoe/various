@@ -51,8 +51,15 @@ contract. Read both before changing behavior.
   metadata (`filesMeta`) is reactive.
 - **Date-only values are written as noon local** so the stored date can't
   shift a day across timezones. Date rule comparisons are calendar-day based.
-- **Duplicate `column` mappings:** later visible field wins (documented
-  contract — the payload builder just iterates config order).
+- **Duplicate `column` mappings** must be declared in top-level
+  `sharedColumns` (undeclared duplicates and unmapped declarations are config
+  errors). Later visible field wins — the payload builder just iterates config
+  order and console-warns when more than one is visible.
+- **Appearance chrome** (`form.appearance`: frame card/plain, header
+  band/plain, tint sky/blue/neutral, Abacus `icon`;
+  `confirmation.illustration`) is pure CSS + a couple of markup branches in
+  `renderForm` — asset paths resolve against `designBase` via
+  `resolveAsset()`.
 - **Attachment failures never re-create the item** (`store.itemId` guard);
   retry uploads only what's still `pending`/`failed`.
 - **`pnp.sp.setup` is global** — the adapter re-asserts `baseUrl` before its

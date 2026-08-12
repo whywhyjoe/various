@@ -32,10 +32,41 @@
 }
 .bspf *, .bspf *::before, .bspf *::after { box-sizing: border-box; }
 
-/* Header (title + intro boilerplate from config) */
-.bspf__head { display: flex; flex-direction: column; gap: var(--space-80); margin-bottom: var(--space-240); }
+/* ---------------------------------------------------------------------
+   Frames — how the form sits on the page. Default is the card frame:
+   a raised surface with a tinted header band and a subtle footer for
+   the nav, all from existing surface/tint tokens. `appearance.frame:
+   "plain"` opts back into the flat, chrome-less layout.
+   --------------------------------------------------------------------- */
+.bspf--card {
+  background: var(--surface-raised);
+  border: var(--stroke-thin) solid var(--stroke-divider);
+  border-radius: var(--radius-large);
+  box-shadow: var(--shadow-4);
+  overflow: hidden;
+}
+.bspf--card .bspf__content { padding: var(--space-320); }
+
+/* Header (title + intro boilerplate from config, optional brand icon) */
+.bspf__head {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: var(--space-240);
+  margin-bottom: var(--space-240);
+}
+.bspf__head-copy { display: flex; flex-direction: column; gap: var(--space-80); min-width: 0; }
+.bspf__head-icon { width: 48px; height: 48px; flex: none; }
 .bspf__title { font: var(--type-title3); font-weight: var(--weight-regular); color: var(--fg-primary); margin: 0; }
 .bspf__intro { font: var(--type-body1); color: var(--fg-secondary); margin: 0; max-width: 64ch; }
+/* Band header — a low-saturation tint strip (engagement-layer grounds). */
+.bspf__head--band {
+  margin: 0;
+  padding: var(--space-320);
+  align-items: center;
+  border-bottom: var(--stroke-thin) solid var(--stroke-divider);
+}
+.bspf__head--sky     { background: var(--surface-tint-sky); }
+.bspf__head--blue    { background: var(--surface-tint-blue); }
+.bspf__head--neutral { background: var(--surface-tint-neutral); }
 
 /* Stepper row (reuses .stepper) */
 .bspf__stepper { margin: 0 0 var(--space-240); }
@@ -50,6 +81,11 @@
 .bspf-section__title { font: var(--type-body2-strong); color: var(--fg-primary); margin: 0; }
 .bspf-section__desc  { font: var(--type-caption1); color: var(--fg-secondary); margin: calc(-1 * var(--space-100)) 0 0; max-width: 64ch; }
 .bspf-fields { display: flex; flex-direction: column; gap: var(--space-160); }
+/* Hairline between sibling sections gives each page quiet structure. */
+.bspf-page .bspf-section + .bspf-section {
+  border-top: var(--stroke-thin) solid var(--stroke-divider);
+  padding-top: var(--space-240);
+}
 
 /* Field extras on top of .field */
 .bspf-field__warning { margin: 0; font: var(--type-caption1); color: var(--fg-warning); }
@@ -215,10 +251,18 @@
    --------------------------------------------------------------------- */
 .bspf-nav { display: flex; align-items: center; gap: var(--space-80); margin-top: var(--space-320); }
 .bspf-nav__spacer { flex: 1; }
+/* Footer variant used by the card frame — the .panel__foot register. */
+.bspf-nav--foot {
+  margin-top: 0;
+  padding: var(--space-120) var(--space-320);
+  background: var(--surface-subtle);
+  border-top: var(--stroke-thin) solid var(--stroke-divider);
+}
 .bspf__pageerror { margin-top: var(--space-240); }
 
 .bspf-done { display: flex; flex-direction: column; align-items: center; text-align: center; gap: var(--space-120); padding: var(--space-480) var(--space-160); }
 .bspf-done__icon { color: var(--fg-success); }
+.bspf-done__art { width: 180px; max-width: 60%; height: auto; margin-bottom: var(--space-80); }
 .bspf-done__title { font: var(--type-title3); font-weight: var(--weight-regular); color: var(--fg-primary); margin: 0; }
 .bspf-done__msg { font: var(--type-body1); color: var(--fg-secondary); margin: 0; max-width: 52ch; }
 .bspf-done .btn { margin-top: var(--space-120); }
@@ -239,3 +283,9 @@
 /* Doctor (config validation) report */
 .bspf-doctor { margin-bottom: var(--space-240); display: flex; flex-direction: column; gap: var(--space-120); }
 .bspf-doctor .grid tbody tr { cursor: default; }
+
+/* Narrow containers (one-third columns, mobile) — tighter card padding. */
+@media (max-width: 640px) {
+  .bspf--card .bspf__content, .bspf__head--band { padding: var(--space-240); }
+  .bspf-nav--foot { padding: var(--space-120) var(--space-240); }
+}

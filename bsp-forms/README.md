@@ -26,6 +26,11 @@ two-line web part insert.
 
 ## Features
 
+- **Card presentation** by default: a raised BSP surface with a tinted header
+  band (optional Abacus brand icon), section hairlines, and a footer nav strip
+  — all token-built. `form.appearance` switches frame/band/tint or drops back
+  to a flat layout; `confirmation.illustration` puts a BMO spot illustration
+  on the thank-you screen.
 - **Pages & sections** with a stepper, per-page validation, back navigation.
 - **Field types:** text, textarea, email, phone, number, currency, choice
   (SharePoint-style colored **pill dropdown**, optional fill-in), multichoice
@@ -40,8 +45,9 @@ two-line web part insert.
   mode — e.g. "due date must be ≥ 2 days out" as a warning, "end date must be
   after start date" as a hard stop.
 - **Conditional choice variants:** several fields may map to the **same list
-  column**; only one should be visible at a time, and if more than one is, the
-  **later field in the JSON wins** at submit.
+  column**, declared explicitly via top-level `sharedColumns` (undeclared
+  duplicates are config errors). Only one should be visible at a time; if more
+  than one is, the **later field in the JSON wins** at submit.
 - **Attachments:** drag-drop or browse, count/size/extension limits from
   config, uploaded as native list-item attachments. If the item saves but an
   upload fails, the response is **never duplicated** — the user retries only
