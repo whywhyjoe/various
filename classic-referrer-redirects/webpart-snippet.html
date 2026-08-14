@@ -1,0 +1,22 @@
+<!-- classic-referrer-redirects: paste this into a Script Editor / Embed
+     web part on the landing page that SharePoint redirects old-site
+     traffic to. Keep the config block ABOVE the script tag.
+
+     The JSON below is the live config (same shape as redirects.config.json
+     — edit that file, then paste it in here). Upload classic-redirect.js
+     to the new site's SiteAssets and fix the src path to match. -->
+
+<script type="application/json" id="classic-redirect-config">
+{
+  "oldSiteFragment": "/sites/TandO-Classic/FCU",
+  "newSiteBase": "/sites/TandO-FCU",
+  "signalParam": "classicRedirect",
+  "fallback": "SitePages/Migration-Info.aspx",
+  "redirects": {
+    "": "SitePages/Home.aspx",
+    "NWWSH": "SitePages/NWWSH.aspx",
+    "NWWSH/blah.aspx": "SitePages/NWWSH-Blah.aspx"
+  }
+}
+</script>
+<script src="/sites/TandO-FCU/SiteAssets/classic-redirect.js"></script>
