@@ -42,9 +42,17 @@
     hour: "2-digit", minute: "2-digit", hour12: true
   });
 
-  function fmtDate(value) {
-    // -> MM/DD/YYYY HH:MM AM/PM
-    return EASTERN.format(new Date(value)).replace(",", "");
+  var DATE_ONLY = new Intl.DateTimeFormat("en-US", {
+    timeZone: "UTC",
+    month: "2-digit", day: "2-digit", year: "numeric"
+  });
+
+  function fmtDate(value, fieldInfo) {
+    // Date-only fields (DisplayFormat 0) keep their calendar date — converting
+    // midnight to Eastern would shift them to the previous day. Date+time
+    // fields convert to Eastern. -> MM/DD/YYYY [HH:MM AM/PM]
+    var dateOnly = fieldInfo && fieldInfo.DisplayFormat === 0;
+    return (dateOnly ? DATE_ONLY : EASTERN).format(new Date(value)).replace(",", "");
   }
 
   function asArray(value) {
@@ -60,7 +68,15 @@
   function stripHtml(html) {
     var div = document.createElement("div");
     div.innerHTML = html;
-    return div.textContent || "";
+    // textContent drops <br> and block-element boundaries; turn them into
+    // newlines first so rich-text line breaks survive.
+    Array.prototype.forEach.call(div.querySelectorAll("br"), function (br) {
+      br.parentNode.replaceChild(document.createTextNode("\n"), br);
+    });
+    Array.prototype.forEach.call(div.querySelectorAll("p,div,li"), function (block) {
+      block.appendChild(document.createTextNode("\n"));
+    });
+    return (div.textContent || "").replace(/\n{3,}/g, "\n\n").trim();
   }
 
   // Normalize any field value to markdown-safe text based on its field type.
@@ -78,13 +94,13 @@
       case "MultiChoice":
         return asArray(value).join("; ");
       case "DateTime":
-        return fmtDate(value);
+        return fmtDate(value, fieldInfo);
       case "URL":
         return "[" + (value.Description || value.Url) + "](" + value.Url + ")";
       case "Boolean":
         return value ? "Yes" : "No";
       case "Note":
-        return stripHtml(String(value)).trim();
+        return stripHtml(String(value));
       default:
         return String(value);
     }
@@ -96,11 +112,24 @@
     return text.replace(/\r\n|\r|\n/g, "\n    ");
   }
 
+  // Headings must stay on one line; collapse any internal whitespace.
+  function headingText(text) {
+    return String(text).replace(/\s+/g, " ").trim();
+  }
+
   function serverRelative(url) {
     return url.replace(/^https?:\/\/[^/]+/, "").replace(/\/$/, "");
   }
 
   window.intakeListToMarkdown = function (config) {
+    if (!config) { throw new Error("config is required"); }
+    ["siteUrl", "listTitle", "outputFolder", "fileName", "title"].forEach(function (name) {
+      if (!config[name]) { throw new Error("config." + name + " is required"); }
+    });
+    if (!Array.isArray(config.fields) || config.fields.length === 0) {
+      throw new Error("config.fields must be a non-empty array");
+    }
+
     var top = config.top || 50;
     var orderBy = config.orderBy || "ID";
     var ascending = config.ascending === true;
@@ -114,7 +143,7 @@
     return pnp.sp.createIsolated({ baseUrl: config.siteUrl })
       .then(function (sp) {
         list = sp.web.lists.getByTitle(config.listTitle);
-        return list.fields.select("InternalName", "Title", "TypeAsString", "LookupField")();
+        return list.fields.select("InternalName", "Title", "TypeAsString", "LookupField", "DisplayFormat")();
       })
       .then(function (allFields) {
         allFields.forEach(function (f) { fieldInfoByName[f.InternalName] = f; });
@@ -149,13 +178,15 @@
         items = fetched;
 
         // Group items by the normalized group-by value, preserving sort order
-        // within each group. Groups are ordered alphabetically.
-        var groups = {};
+        // within each group. Groups are ordered alphabetically. Null prototype:
+        // a plain {} breaks on values like "constructor".
+        var groups = Object.create(null);
         items.forEach(function (item) {
-          var key = normalize(item[groupBy], fieldInfoByName[groupBy]) || "(blank)";
-          (groups[key] = groups[key] || []).push(item);
+          var key = headingText(normalize(item[groupBy], fieldInfoByName[groupBy])) || "(blank)";
+          if (!groups[key]) { groups[key] = []; }
+          groups[key].push(item);
         });
-        var groupKeys = Object.keys(groups).sort();
+        var groupKeys = Object.keys(groups).sort(function (a, b) { return a.localeCompare(b); });
 
         var md = [];
         md.push("# " + config.title + " (as of " + fmtDate(new Date()) + ")");
@@ -168,7 +199,7 @@
           md.push("");
           md.push("## " + fieldInfoByName[groupBy].Title + ": " + key);
           groups[key].forEach(function (item) {
-            var heading = normalize(item[fields[0]], fieldInfoByName[fields[0]]);
+            var heading = headingText(normalize(item[fields[0]], fieldInfoByName[fields[0]]));
             md.push("");
             md.push("### Item: " + heading);
             md.push("");

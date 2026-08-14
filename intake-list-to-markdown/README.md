@@ -67,18 +67,26 @@ intakeListToMarkdown({
 Groups are sorted alphabetically; items keep the pull sort order (default ID desc).
 Items with an empty group-by value land in a `(blank)` group.
 
+Required config keys are checked up front — a missing one throws immediately with
+a clear message instead of failing mid-request. `top` is a single request;
+SharePoint caps it at 5000.
+
 ## Field normalization
 
 Everything is rendered as text:
 
 - **Person** → `Display Name | email` (multi-person joined with `; `)
 - **Choice** → as-is; **multi-choice** → `choice; choice; choice`
-- **Date** → `MM/DD/YYYY HH:MM AM/PM` Eastern time
+- **Date & time** → `MM/DD/YYYY HH:MM AM/PM` Eastern time; **date-only** columns
+  → just `MM/DD/YYYY`, with no timezone shift (so a due date never rolls back a day)
 - **URL** → `[description](url)`
-- **Multiline** → line breaks preserved, continuation lines indented to stay inside the bullet (rich text is stripped to plain text)
+- **Multiline** → line breaks preserved, continuation lines indented to stay inside
+  the bullet; rich text is stripped to plain text with `<br>`/paragraph/list
+  boundaries kept as line breaks
 - **Lookup** → the looked-up display value (multi joined with `; `)
 - **Yes/No** → `Yes` / `No`
-- Empty values → blank
+- Empty values → blank; values used in headings (group value, item heading) are
+  collapsed to a single line
 
 Field labels in the output are the SharePoint display names; `fields`, `groupBy`,
 and `orderBy` in the config use internal names.
