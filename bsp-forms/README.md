@@ -121,6 +121,18 @@ python -m http.server 8000
 Set `window.BSPF_MOCK_FAIL = { addItem: true }` (or `addAttachment`, …) in
 devtools to exercise the error paths.
 
+**Regression suite:** `dev/smoke.spec.js` drives the harness headlessly
+(Playwright, dev-only — never deployed) through edit mode, the config-error
+paths, the full submit flow, and the payload invariants:
+
+```
+node various/bsp-forms/dev/smoke.spec.js   # server running as above
+```
+
+If a form fails to initialize on a live page (e.g. a transient config fetch),
+the mount stays retryable: `BSPForms.retry(div)` from devtools, or any
+re-scan, re-attempts it.
+
 ## Caveats & design notes
 
 - **People search** uses SharePoint's `ClientPeoplePickerSearchUser` API
@@ -148,6 +160,6 @@ devtools to exercise the error paths.
 | `forms/example-it-request.json` | Reference config exercising every feature. |
 | `webpart/bsp-forms.webpart.html` | The web part insert snippet. |
 | `docs/CONFIG-REFERENCE.md` | Full JSON reference — every key, type, and rule. |
-| `dev/` | Local harness + mock adapter + vendored Alpine (never deployed). |
+| `dev/` | Local harness + mock adapter + vendored Alpine + `smoke.spec.js` regression suite (never deployed). |
 
 Deploy only `bsp-forms.js`, `bsp-forms.css`, and your `forms/*.json`.

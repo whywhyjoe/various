@@ -82,6 +82,9 @@
   function safeKey(id) {
     var k = String(id || '').replace(/[^A-Za-z0-9_]/g, '_');
     if (!/^[A-Za-z_]/.test(k)) k = 'f_' + k;
+    // names that collide with Object.prototype (or set the prototype) can't
+    // be state keys — dot access and {}-map lookups would misbehave
+    if (k === '__proto__' || k === 'constructor' || k === 'prototype') k = 'f_' + k;
     return k;
   }
   function el(tag, cls, text) {
@@ -178,12 +181,19 @@
      Asset loading — idempotent; every injected element carries a
      data-bspf marker so re-evaluation never duplicates anything.
      ------------------------------------------------------------------ */
+  function canonicalUrl(u) {
+    try { return new URL(u, document.baseURI).href; } catch (e) { return u; }
+  }
   function ensureCss(href, key) {
     if (document.querySelector('link[data-bspf-css="' + key + '"]')) return;
-    var name = href.split('?')[0].split('/').pop();
+    // dedupe by canonical URL (query-stripped), never by basename — an
+    // unrelated stylesheet that happens to be called components.css must
+    // not suppress the real one
+    var wanted = canonicalUrl(href.split('?')[0]);
     var links = document.querySelectorAll('link[rel="stylesheet"]');
     for (var i = 0; i < links.length; i++) {
-      if ((links[i].getAttribute('href') || '').split('?')[0].split('/').pop() === name) return;
+      var lh = (links[i].getAttribute('href') || '').split('?')[0];
+      if (lh && canonicalUrl(lh) === wanted) return;
     }
     var l = document.createElement('link');
     l.rel = 'stylesheet'; l.href = href; l.setAttribute('data-bspf-css', key);
@@ -415,13 +425,18 @@
     if (!Array.isArray(cfg.pages) || !cfg.pages.length) errors.push('pages must be a non-empty array');
     cfg.pages = cfg.pages || [];
 
-    var byKey = {}, ordered = [], keyOfId = {};
+    // null-prototype maps: field/section ids are author-supplied, so keys
+    // like "constructor" must be plain data, not inherited properties
+    var byKey = Object.create(null), ordered = [], keyOfId = Object.create(null);
+    var sectionsById = Object.create(null);
     cfg.pages.forEach(function (pg, pi) {
       pg.id = pg.id || ('page' + (pi + 1));
       pg.sections = Array.isArray(pg.sections) ? pg.sections : [];
       if (!pg.sections.length) errors.push('page "' + pg.id + '" has no sections');
       pg.sections.forEach(function (sec, si) {
         sec.id = sec.id || (pg.id + '_s' + (si + 1));
+        if (sectionsById[sec.id]) errors.push('duplicate section id "' + sec.id + '"');
+        else sectionsById[sec.id] = sec;
         sec.fields = Array.isArray(sec.fields) ? sec.fields : [];
         sec.fields.forEach(function (f, fi) {
           if (!f.id) { errors.push('field #' + (fi + 1) + ' in section "' + sec.id + '" is missing an id'); f.id = sec.id + '_f' + fi; }
@@ -430,6 +445,12 @@
           if (byKey[k]) errors.push('duplicate field id "' + f.id + '"');
           f.k = k; f.page = pi; f.section = sec.id;
           f.validation = f.validation || {};
+          if (f.validation.pattern != null) {
+            // compile once: a bad pattern is a config error, never a
+            // silently-disabled rule
+            try { f._pattern = new RegExp(f.validation.pattern); }
+            catch (e) { errors.push('field "' + f.id + '": validation.pattern is invalid (' + e.message + ')'); }
+          }
           if (f.type === 'choice' || f.type === 'multichoice') {
             var ch = Array.isArray(f.choices) ? f.choices : [];
             if (!ch.length) errors.push('field "' + f.id + '": choices are required for type ' + f.type);
@@ -482,7 +503,7 @@
     // shared columns — several fields may write one column, but only when
     // the config says so explicitly; accidental duplicates are config errors.
     var shared = Array.isArray(cfg.sharedColumns) ? cfg.sharedColumns.slice() : [];
-    var colFields = {};
+    var colFields = Object.create(null);
     ordered.forEach(function (f) {
       if (f.column) (colFields[f.column] = colFields[f.column] || []).push(f.id);
     });
@@ -498,6 +519,7 @@
     cfg._sharedColumns = shared; cfg._colFields = colFields;
 
     cfg._byKey = byKey; cfg._ordered = ordered; cfg._keyOfId = keyOfId;
+    cfg._sectionsById = sectionsById;
     return { cfg: cfg, errors: errors };
   }
 
@@ -800,11 +822,13 @@
   }
 
   function renderHeading(f) {
-    var h = '<div class="bspf-section__title" role="heading" aria-level="4"';
+    // one wrapper owns title + description so visibility hides both
+    var h = '<div class="bspf-heading"';
     if (f.visibleWhen) h += ' x-show="vis(' + esc(jstr(f.k)) + ')" x-cloak';
-    h += '>' + esc(f.text || f.label || '') + '</div>';
+    h += '>';
+    h += '<div class="bspf-section__title" role="heading" aria-level="4">' + esc(f.text || f.label || '') + '</div>';
     if (f.description) h += '<p class="bspf-section__desc">' + esc(f.description) + '</p>';
-    return h;
+    return h + '</div>';
   }
   function renderNote(f) {
     var style = f.style || 'info';
@@ -817,15 +841,16 @@
       '<div class="msgbar__body">' + esc(f.text || '') + '</div></div>';
   }
 
-  function renderAttachments(cfg, S) {
+  function renderAttachments(cfg, S, uid) {
     var a = cfg.attachments;
+    var labelId = uid + '-att-label'; // per-instance: DOM ids are document-global
     var acceptAttr = a.accept && a.accept.length ? ' accept="' + esc(a.accept.join(',')) + '"' : '';
     var hint = a.hint || fmtStr(S.attachHint, {}) ||
       (a.maxFiles + ' files max · ' + a.maxFileSizeMb + ' MB each' + (a.accept && a.accept.length ? ' · ' + a.accept.join(', ') : ''));
     var h = '<div class="field bspf-attach" data-bspf-field="_attachments">';
-    h += '<span class="field__label" id="att_lbl_x">' + esc(a.label) +
+    h += '<span class="field__label" id="' + esc(labelId) + '">' + esc(a.label) +
       (a.required ? ' <span class="field__req" aria-hidden="true">*</span>' : '') + '</span>';
-    h += '<div class="dropzone bspf-attach__drop" tabindex="0" role="button" aria-labelledby="att_lbl_x"' +
+    h += '<div class="dropzone bspf-attach__drop" tabindex="0" role="button" aria-labelledby="' + esc(labelId) + '"' +
       ' :class="{ \'is-drag\': dragging }"' +
       ' @click="$refs.fileinp.click()" @keydown.enter.prevent="$refs.fileinp.click()"' +
       ' @dragover.prevent="dragging=true" @dragleave="dragging=false" @drop.prevent="dropFiles($event)">' +
@@ -920,7 +945,7 @@
         h += '</div></section>';
       });
       if (cfg.attachments.enabled && cfg.attachments.page === i) {
-        h += '<section class="bspf-section">' + renderAttachments(cfg, S) + '</section>';
+        h += '<section class="bspf-section">' + renderAttachments(cfg, S, uid) + '</section>';
       }
       h += '</div>';
     });
@@ -1041,12 +1066,10 @@
         return evalRule(f.visibleWhen, function (id) { return self._get(id); });
       },
       secVis: function (secId) {
-        var self = this, rule = null;
-        cfg.pages.forEach(function (pg) {
-          pg.sections.forEach(function (s) { if (s.id === secId) rule = s.visibleWhen; });
-        });
-        if (!rule) return true;
-        return evalRule(rule, function (id) { return self._get(id); });
+        var sec = cfg._sectionsById[secId];
+        if (!sec || !sec.visibleWhen) return true;
+        var self = this;
+        return evalRule(sec.visibleWhen, function (id) { return self._get(id); });
       },
       fieldActive: function (f) {
         // a field counts (validation + submit) only when it and its section are visible
@@ -1247,10 +1270,8 @@
               if (val.minLength && v.length < val.minLength) msg = fmtStr(S.textMinLength, { min: val.minLength });
               else if (val.maxLength && v.length > val.maxLength) msg = fmtStr(S.textMaxLength, { max: val.maxLength });
               else if (val.url && !validUrl(v)) msg = S.invalidUrl;
-              else if (val.pattern) {
-                try {
-                  if (!(new RegExp(val.pattern)).test(v)) msg = val.patternMessage || S.patternMismatch;
-                } catch (e) { /* bad regex in config — surfaced by doctor, not the user */ }
+              else if (f._pattern && !f._pattern.test(v)) {
+                msg = val.patternMessage || S.patternMismatch;
               }
               break;
             case 'number': case 'currency':
@@ -1668,17 +1689,20 @@
   function applyEditState() {
     var edit = inEditMode();
     document.querySelectorAll('[data-bsp-form]').forEach(function (m) {
-      if (m.__bspfDeferred && !edit) {
-        m.__bspfDeferred = false;
-        initMount(m);
+      if (m.__bspfDeferred) {
+        // still deferred: keep the placeholder up until edit mode ends
+        if (!edit) { m.__bspfDeferred = false; initMount(m); }
         return;
       }
-      m.classList.toggle('is-suspended', edit && !m.__bspfDeferred);
+      m.classList.toggle('is-suspended', edit);
     });
   }
 
   function fatalCard(mount, S, detail) {
+    // engine-owned failure UI: tagged so retries can clear it cleanly
+    mount.querySelectorAll('[data-bspf-fatal]').forEach(function (n) { n.remove(); });
     var bar = el('div', 'msgbar msgbar--danger');
+    bar.setAttribute('data-bspf-fatal', '');
     bar.setAttribute('role', 'alert');
     bar.innerHTML = icon(ICONS.danger, 20).replace('class="icon', 'class="msgbar__icon icon') +
       '<div class="msgbar__body">' + esc(S.configLoadError) +
@@ -1724,15 +1748,16 @@
     var configUrl = mount.getAttribute('data-config') || '';
 
     if (inEditMode()) {
+      // Defer real init and show the inert placeholder. The note is only
+      // visible WHILE .is-suspended is present, so the class must stay on
+      // for the whole edit session (see bsp-forms.css).
       mount.__bspfDeferred = true;
-      mount.classList.add('is-suspended');
+      mount.classList.add('is-suspended', 'is-edit-deferred');
       if (!mount.querySelector('.bspf-editnote')) mount.appendChild(editNote(configUrl, DEFAULT_STRINGS));
-      // note: suspended styling hides nothing yet (no form built); the note shows.
-      mount.classList.remove('is-suspended');
-      mount.classList.add('is-edit-deferred');
       return;
     }
-    mount.classList.remove('is-edit-deferred');
+    mount.classList.remove('is-suspended', 'is-edit-deferred');
+    mount.querySelectorAll('[data-bspf-fatal]').forEach(function (n) { n.remove(); });
 
     mount.setAttribute('data-bspf-state', 'initializing');
     var spriteReady = ensureSprite();
@@ -1767,6 +1792,9 @@
       });
     }).catch(function (e) {
       console.error('[BSP Forms] init failed:', e);
+      // config fetches and library loads can fail transiently — leave the
+      // mount retryable by the next scan / script re-evaluation
+      mount.__bspfInit = false;
       mount.setAttribute('data-bspf-state', 'error');
       fatalCard(mount, DEFAULT_STRINGS, e && e.message);
     });
@@ -1779,10 +1807,20 @@
       try { initMount(m); }
       catch (e) {
         console.error('[BSP Forms] init threw:', e);
+        m.__bspfInit = false;
         m.setAttribute('data-bspf-state', 'error');
         fatalCard(m, DEFAULT_STRINGS, e && e.message);
       }
     });
+  };
+
+  // Explicit retry for a mount that failed to initialize (devtools aid; the
+  // next NS.scan() would also pick it up since failure clears __bspfInit).
+  NS.retry = function (mount) {
+    if (!mount || mount.getAttribute('data-bspf-state') !== 'error') return;
+    mount.querySelectorAll('[data-bspf-fatal]').forEach(function (n) { n.remove(); });
+    mount.__bspfInit = false;
+    NS.scan();
   };
 
   if (document.readyState === 'loading') {

@@ -23,6 +23,12 @@ contract. Read both before changing behavior.
   `document.currentScript`. The L1/L2 tier model does NOT apply here.
 - **Buildless is non-negotiable.** What's authored is what runs: no modules,
   no bundler, no CDN at runtime. `dev/vendor/alpine.js` is dev-harness-only.
+- **ES5-style source is a settled decision.** Target browsers would run
+  `let`/`const`/template literals fine (the code already uses `Promise` and
+  `fetch`), but classic `var`/`function` is the house idiom across the
+  BSP/DCS SharePoint projects; a syntax modernization was proposed in review
+  and declined as churn with no behavior gain. Don't re-litigate it
+  piecemeal — match the existing style.
 
 ## File map
 
@@ -36,6 +42,24 @@ contract. Read both before changing behavior.
 
 ## Paid-for gotchas (don't relearn these)
 
+- **The edit-mode placeholder depends on `.is-suspended` staying ON.** The
+  CSS shows `.bspf-editnote` only while the mount has the class, so a
+  deferred (edit-at-boot) mount keeps it for the whole edit session and
+  `applyEditState` must never touch deferred mounts' classes. Removing the
+  class "because nothing is built yet" blanks the web part in edit mode —
+  that exact bug shipped once and was caught in code review.
+- **Init failures are retryable.** A failed mount clears `__bspfInit`, so any
+  later `BSPForms.scan()` (or script re-evaluation) retries; error cards are
+  tagged `data-bspf-fatal` and cleared on retry. `BSPForms.retry(mount)` is
+  the devtools shortcut. Don't reintroduce a permanent init flag.
+- **Stylesheet dedupe is by canonical URL (query-stripped), never basename** —
+  an unrelated `components.css` on the page must not suppress the real one.
+- **Field/section ids are author data**: index maps are null-prototype and
+  `safeKey` remaps `__proto__`/`constructor`/`prototype`, so ids like
+  "constructor" behave as plain data. Keep new lookup maps
+  `Object.create(null)`.
+- **`validation.pattern` compiles once at normalize time** (`f._pattern`); an
+  invalid regex is a config error, never a silently-skipped rule.
 - **No `<button>` inside the combo control.** The control is a
   `div[role="combobox"]` *because* selected multi-choice pills carry remove
   `<button>`s — HTML forbids nested buttons and the parser silently re-parents
@@ -79,12 +103,19 @@ python -m http.server 8000       # from the parent of both clones
 http://localhost:8000/various/bsp-forms/dev/index.html      (?validate → doctor)
 ```
 
-Walk all three pages of the example form; check the console is clean (the two
-`about:invalid` photo errors are the mock exercising the initials fallback)
-and inspect `__BSPF_MOCK_WRITES__` for the exact payload. Headless: drive that
-page with Playwright against the pre-installed Chromium; prefer programmatic
-`el.click()` for nav buttons — pointer-coordinate clicks flake when validation
-messages shift layout mid-click.
+Then run the regression suite — it covers the lifecycle and payload
+invariants manual clicking misses (edit-mode placeholder, config-error paths,
+hidden-field exclusion, shared-column precedence, attachment retry):
+
+```
+node dev/smoke.spec.js [harness url]     # needs playwright installed; dev-only
+```
+
+All checks must pass before a push. When extending it, keep nav clicks
+programmatic (`el.click()` via evaluate) — pointer-coordinate clicks flake
+when validation messages shift layout mid-click. In manual runs, the two
+`about:invalid` photo errors are the mock exercising the initials fallback;
+inspect `__BSPF_MOCK_WRITES__` for the exact payload.
 
 ## Scope guards
 
