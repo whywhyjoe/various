@@ -62,6 +62,23 @@
       '/' + trimSlashes(dest);
   }
 
+  // "https://host/x" -> "https://host"; relative URLs -> "".
+  function originOf(url) {
+    var m = /^([a-z][a-z0-9+.-]*):\/\/([^\/?#]*)/i.exec(String(url || ''));
+    return m ? (m[1] + '://' + m[2]).toLowerCase() : '';
+  }
+
+  // Same page = same path, and same origin when both sides carry one — an
+  // absolute destination on another host may legitimately share our path.
+  function isSamePage(target, currentUrl) {
+    var targetOrigin = originOf(target);
+    var currentOrigin = originOf(currentUrl);
+    if (targetOrigin && currentOrigin && targetOrigin !== currentOrigin) {
+      return false;
+    }
+    return pathOf(target).toLowerCase() === pathOf(currentUrl).toLowerCase();
+  }
+
   // Tag the destination so its page can detect the redirect:
   //   ?classicRedirect=1&classicRedirectFrom=<old server-relative path>
   function addSignal(url, config, fromPath) {
@@ -76,8 +93,58 @@
     return url + hash;
   }
 
+  // Returns null when the config is usable, otherwise a message describing
+  // the first problem found. A bad config aborts the redirect entirely
+  // rather than guessing — silent misroutes look like unmapped referrers.
+  function validateConfig(config) {
+    if (!config || typeof config !== 'object') {
+      return 'config must be an object';
+    }
+    if (typeof config.oldSiteFragment !== 'string' ||
+        !trimSlashes(config.oldSiteFragment)) {
+      return 'oldSiteFragment must be a non-empty string';
+    }
+    if (config.newSiteBase !== undefined &&
+        typeof config.newSiteBase !== 'string') {
+      return 'newSiteBase must be a string';
+    }
+    if (config.fallback !== undefined && typeof config.fallback !== 'string') {
+      return 'fallback must be a string';
+    }
+    if (config.signalParam !== undefined &&
+        !/^[A-Za-z][A-Za-z0-9_-]*$/.test(config.signalParam)) {
+      return 'signalParam must be letters/digits/_/- starting with a letter';
+    }
+    if (config.redirects !== undefined) {
+      if (!config.redirects || typeof config.redirects !== 'object' ||
+          Array.isArray(config.redirects)) {
+        return 'redirects must be an object of oldPath -> destination';
+      }
+      var seen = Object.create(null);
+      for (var key in config.redirects) {
+        if (!Object.prototype.hasOwnProperty.call(config.redirects, key)) {
+          continue;
+        }
+        if (typeof config.redirects[key] !== 'string') {
+          return 'redirect destination for "' + key + '" must be a string';
+        }
+        // Lookup is case-/slash-insensitive, so these would collide with
+        // whichever the for-in loop happens to visit first winning.
+        var norm = trimSlashes(key).toLowerCase();
+        if (seen[norm]) {
+          return 'redirect keys "' + seen[norm] + '" and "' + key +
+            '" collide after normalization';
+        }
+        seen[norm] = key;
+      }
+    }
+    return null;
+  }
+
   // Full URL to redirect to, or null to stay on the current page.
-  function resolveRedirect(config, referrer, currentPath) {
+  // currentUrl should be the full href so absolute destinations on another
+  // origin aren't mistaken for the current page.
+  function resolveRedirect(config, referrer, currentUrl) {
     if (!config || !config.oldSiteFragment || !referrer) return null;
 
     var refPath = pathOf(referrer);
@@ -95,8 +162,7 @@
 
     var url = resolveDestination(config, dest);
     // Never redirect the landing page to itself.
-    if (currentPath &&
-        pathOf(url).toLowerCase() === pathOf(currentPath).toLowerCase()) {
+    if (currentUrl && isSamePage(url, currentUrl)) {
       return null;
     }
     return addSignal(url, config, refPath);
@@ -122,14 +188,22 @@
   function run() {
     var config = readConfig(root.document);
     if (!config) return;
+    var problem = validateConfig(config);
+    if (problem) {
+      if (root.console) {
+        root.console.error('classic-redirect: bad config — ' + problem);
+      }
+      return;
+    }
     var target = resolveRedirect(
-      config, root.document.referrer, root.location.pathname);
+      config, root.document.referrer, root.location.href);
     // replace() keeps the landing page out of Back-button history.
     if (target) root.location.replace(target);
   }
 
   var api = {
     resolveRedirect: resolveRedirect,
+    validateConfig: validateConfig,
     pathOf: pathOf,
     run: run
   };
